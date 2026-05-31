@@ -16,22 +16,17 @@ export const Route = createFileRoute("/")({
 function Onboarding() {
   const navigate = useNavigate();
   const [name, setName] = useState("");
-  const [handle, setHandle] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (getProfile()) navigate({ to: "/chat" });
   }, [navigate]);
 
-  const sanitize = (v: string) => v.toLowerCase().replace(/[^a-z0-9_.]/g, "");
-
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const n = name.trim();
-    const h = sanitize(handle);
     if (n.length < 1) return setError("Please enter your name");
-    if (h.length < 3) return setError("Handle must be at least 3 characters");
-    saveProfile({ name: n, handle: h });
+    saveProfile({ name: n, handle: "" });
     navigate({ to: "/chat" });
   };
 
@@ -77,25 +72,8 @@ function Onboarding() {
           </div>
 
           <div>
-            <label htmlFor="handle" className="mb-1.5 block text-sm font-medium text-foreground">
-              Username
-            </label>
-            <div className="flex items-center rounded-lg border border-input bg-background focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/15">
-              <span className="pl-3.5 text-muted-foreground">@</span>
-              <input
-                id="handle"
-                value={handle}
-                onChange={(e) => {
-                  setHandle(sanitize(e.target.value));
-                  setError(null);
-                }}
-                placeholder="ada"
-                autoComplete="off"
-                className="w-full bg-transparent px-2 py-2.5 text-[15px] outline-none"
-              />
-            </div>
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              Lowercase letters, numbers, dots and underscores. No spaces.
+            <p className="text-sm text-muted-foreground">
+              No account needed — just your name.
             </p>
           </div>
 
