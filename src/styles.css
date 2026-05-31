@@ -121,3 +121,21 @@
     -webkit-font-smoothing: antialiased;
   }
 }
+
+@keyframes calibrate-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.calibrate-enter { animation: calibrate-enter 280ms ease-out both; }
+
+@keyframes calibrate-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.calibrate-pulse { animation: calibrate-pulse 1.4s ease-in-out infinite; }
+
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+  30% { transform: translateY(-3px); opacity: 1; }
+}
+.typing-dot { animation: typing-bounce 1.2s ease-in-out infinite; }

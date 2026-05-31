@@ -6,6 +6,18 @@ import { useProfile } from "@/lib/profile";
 import { ClaudeLogo } from "@/components/claude-logo";
 import { Lightbulb, GraduationCap, Code2, PenLine, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  CalibratePanel,
+  CalibrateEvaluating,
+  CalibrateError,
+  CalibrateLimitReached,
+} from "@/components/calibrate-panel";
+import {
+  generateReply,
+  evaluateReply,
+  type CalibrateResult,
+  type Stakes,
+} from "@/lib/gemini";
 
 export const Route = createFileRoute("/chat")({
   head: () => ({
@@ -17,45 +29,135 @@ export const Route = createFileRoute("/chat")({
   component: ChatPage,
 });
 
+type EvalState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "done"; result: CalibrateResult }
+  | { kind: "error"; message: string }
+  | { kind: "limit" }
+  | { kind: "dismissed" };
+
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  userPrompt?: string; // for assistant: the prompt that produced it
+  pending?: boolean; // assistant message still generating
+  evalState?: EvalState;
 }
 
 const SUGGESTIONS = [
-  { icon: PenLine, label: "Write", prompt: "Help me write a short story about…" },
-  { icon: Code2, label: "Code", prompt: "Explain this code snippet:" },
-  { icon: GraduationCap, label: "Learn", prompt: "Teach me about quantum entanglement" },
-  { icon: Lightbulb, label: "Brainstorm", prompt: "Brainstorm ideas for a weekend project" },
+  { icon: PenLine, label: "Write", prompt: "Help me write a short story about a lighthouse keeper." },
+  { icon: Code2, label: "Code", prompt: "Explain how JavaScript closures work with a small example." },
+  { icon: GraduationCap, label: "Learn", prompt: "Teach me about quantum entanglement in simple terms." },
+  { icon: Lightbulb, label: "Brainstorm", prompt: "Brainstorm 5 ideas for a weekend project." },
 ];
+
+const SESSION_KEY = "calibrate_eval_count";
+const SESSION_LIMIT = 10;
+
+function readCount(): number {
+  if (typeof window === "undefined") return 0;
+  return Number(sessionStorage.getItem(SESSION_KEY) || "0");
+}
+function writeCount(n: number) {
+  sessionStorage.setItem(SESSION_KEY, String(n));
+}
 
 function ChatPage() {
   const { profile, loaded } = useProfile();
   const navigate = useNavigate();
   const [messages, setMessages] = useState<Message[]>([]);
   const [recents, setRecents] = useState<{ id: string; title: string }[]>([]);
+  const [stakes, setStakes] = useState<Stakes>("low");
+  const [evalCount, setEvalCount] = useState(0);
 
   useEffect(() => {
     if (loaded && !profile) navigate({ to: "/" });
   }, [loaded, profile, navigate]);
 
-  const send = (text: string) => {
-    const id = crypto.randomUUID();
-    const user: Message = { id, role: "user", content: text };
-    const reply: Message = {
-      id: crypto.randomUUID(),
+  useEffect(() => {
+    setEvalCount(readCount());
+  }, []);
+
+  const updateMessage = (id: string, patch: Partial<Message>) => {
+    setMessages((ms) => ms.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+  };
+
+  const send = async (text: string) => {
+    const userId = crypto.randomUUID();
+    const assistantId = crypto.randomUUID();
+    const userMsg: Message = { id: userId, role: "user", content: text };
+    const assistantMsg: Message = {
+      id: assistantId,
       role: "assistant",
-      content:
-        "This is a frontend-only demo. Hook up your own backend to make me actually respond — but the interface looks pretty nice, doesn't it?",
+      content: "",
+      userPrompt: text,
+      pending: true,
+      evalState: { kind: "idle" },
     };
-    setMessages((m) => [...m, user, reply]);
+    setMessages((m) => [...m, userMsg, assistantMsg]);
     if (messages.length === 0) {
-      setRecents((r) => [{ id, title: text.slice(0, 40) }, ...r].slice(0, 12));
+      setRecents((r) => [{ id: userId, title: text.slice(0, 40) }, ...r].slice(0, 12));
+    }
+
+    // Generation
+    let reply: string;
+    try {
+      reply = await generateReply(text);
+    } catch (e) {
+      const msg =
+        e instanceof Error && e.message.includes("VITE_GEMINI_API_KEY")
+          ? "Add VITE_GEMINI_API_KEY to .env to enable live responses."
+          : "Sorry — I couldn't generate a response. Please try again.";
+      updateMessage(assistantId, {
+        content: msg,
+        pending: false,
+        evalState: { kind: "error", message: "Evaluation unavailable — please try again" },
+      });
+      return;
+    }
+    updateMessage(assistantId, { content: reply, pending: false });
+
+    // Session limit check
+    const current = readCount();
+    if (current >= SESSION_LIMIT) {
+      updateMessage(assistantId, { evalState: { kind: "limit" } });
+      return;
+    }
+
+    // Evaluation
+    updateMessage(assistantId, { evalState: { kind: "loading" } });
+    try {
+      const result = await evaluateReply(text, reply, stakes);
+      const next = current + 1;
+      writeCount(next);
+      setEvalCount(next);
+      updateMessage(assistantId, { evalState: { kind: "done", result } });
+    } catch (e) {
+      const message =
+        e instanceof Error && e.name === "AbortError"
+          ? "Evaluation timed out — please try again"
+          : e instanceof SyntaxError
+            ? "Unable to parse evaluation — raw response available"
+            : "Evaluation unavailable — please try again";
+      updateMessage(assistantId, { evalState: { kind: "error", message } });
     }
   };
 
   const newChat = () => setMessages([]);
+
+  const resetSession = () => {
+    sessionStorage.removeItem(SESSION_KEY);
+    setEvalCount(0);
+    setMessages((ms) =>
+      ms.map((m) =>
+        m.role === "assistant" && m.evalState?.kind === "limit"
+          ? { ...m, evalState: { kind: "dismissed" } }
+          : m,
+      ),
+    );
+  };
 
   const greeting = useMemo(() => {
     const h = new Date().getHours();
@@ -99,6 +201,7 @@ function ChatPage() {
                 </h1>
               </div>
 
+              <StakesToggle stakes={stakes} onChange={setStakes} count={evalCount} />
               <Composer autoFocus onSubmit={send} />
 
               <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
@@ -120,12 +223,19 @@ function ChatPage() {
             <div className="flex-1 overflow-y-auto">
               <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
                 {messages.map((m) => (
-                  <MessageBubble key={m.id} message={m} profile={profile} />
+                  <MessageBubble
+                    key={m.id}
+                    message={m}
+                    profile={profile}
+                    onDismissEval={() => updateMessage(m.id, { evalState: { kind: "dismissed" } })}
+                    onResetSession={resetSession}
+                  />
                 ))}
               </div>
             </div>
             <div className="border-t border-border/60 bg-background px-4 py-4">
               <div className="mx-auto max-w-3xl">
+                <StakesToggle stakes={stakes} onChange={setStakes} count={evalCount} />
                 <Composer onSubmit={send} placeholder="Reply to Claude…" />
                 <p className="mt-2 text-center text-[11px] text-muted-foreground">
                   Claude can make mistakes. Please double-check responses.
@@ -139,7 +249,81 @@ function ChatPage() {
   );
 }
 
-function MessageBubble({ message, profile }: { message: Message; profile: { name: string } }) {
+function StakesToggle({
+  stakes,
+  onChange,
+  count,
+}: {
+  stakes: Stakes;
+  onChange: (s: Stakes) => void;
+  count: number;
+}) {
+  const isHigh = stakes === "high";
+  return (
+    <div className="mb-2 flex items-center justify-between gap-3 px-1 text-[12px] text-muted-foreground">
+      <div className="flex items-center gap-2">
+        <span>Evaluation:</span>
+        <button
+          onClick={() => onChange("low")}
+          className={cn(
+            "rounded-md px-1.5 py-0.5 transition-colors",
+            !isHigh && "bg-accent text-foreground font-medium",
+          )}
+        >
+          Low stakes
+        </button>
+        <button
+          role="switch"
+          aria-checked={isHigh}
+          onClick={() => onChange(isHigh ? "low" : "high")}
+          className={cn(
+            "relative h-4 w-7 rounded-full transition-colors",
+            isHigh ? "bg-primary" : "bg-border",
+          )}
+        >
+          <span
+            className={cn(
+              "absolute top-0.5 h-3 w-3 rounded-full bg-background shadow transition-all",
+              isHigh ? "left-3.5" : "left-0.5",
+            )}
+          />
+        </button>
+        <button
+          onClick={() => onChange("high")}
+          className={cn(
+            "rounded-md px-1.5 py-0.5 transition-colors",
+            isHigh && "bg-accent text-foreground font-medium",
+          )}
+        >
+          High stakes
+        </button>
+      </div>
+      <span className="text-[11px]">{count}/{SESSION_LIMIT} evals</span>
+    </div>
+  );
+}
+
+function TypingIndicator() {
+  return (
+    <div className="flex items-center gap-1 py-1">
+      <span className="typing-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" style={{ animationDelay: "0s" }} />
+      <span className="typing-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" style={{ animationDelay: "0.2s" }} />
+      <span className="typing-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" style={{ animationDelay: "0.4s" }} />
+    </div>
+  );
+}
+
+function MessageBubble({
+  message,
+  profile,
+  onDismissEval,
+  onResetSession,
+}: {
+  message: Message;
+  profile: { name: string };
+  onDismissEval: () => void;
+  onResetSession: () => void;
+}) {
   const isUser = message.role === "user";
   return (
     <div className={cn("flex gap-3", isUser ? "flex-row-reverse" : "flex-row")}>
@@ -156,13 +340,33 @@ function MessageBubble({ message, profile }: { message: Message; profile: { name
       </div>
       <div
         className={cn(
-          "max-w-[85%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed",
-          isUser
-            ? "bg-primary text-primary-foreground"
-            : "bg-transparent text-foreground",
+          "max-w-[85%] min-w-0",
+          isUser ? "" : "flex-1",
         )}
       >
-        {message.content}
+        <div
+          className={cn(
+            "rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap",
+            isUser ? "bg-primary text-primary-foreground" : "bg-transparent text-foreground",
+          )}
+        >
+          {message.pending ? <TypingIndicator /> : message.content}
+        </div>
+
+        {!isUser && message.evalState && (
+          <>
+            {message.evalState.kind === "loading" && <CalibrateEvaluating />}
+            {message.evalState.kind === "done" && (
+              <CalibratePanel result={message.evalState.result} onDismiss={onDismissEval} />
+            )}
+            {message.evalState.kind === "error" && (
+              <CalibrateError message={message.evalState.message} />
+            )}
+            {message.evalState.kind === "limit" && (
+              <CalibrateLimitReached onReset={onResetSession} />
+            )}
+          </>
+        )}
       </div>
     </div>
   );
