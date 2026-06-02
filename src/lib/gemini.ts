@@ -27,7 +27,7 @@ export interface CalibrateResult {
   recommended_actions: string[];
 }
 
-const HARDCODED_GROQ_API_KEY = "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";
+const HARDCODED_GROQ_API_KEY = "";
 
 const EVALUATION_SYSTEM_PROMPT = `You are a critical AI output evaluation agent. Your job is to help professionals decide whether to trust and use an AI-generated response.
 
