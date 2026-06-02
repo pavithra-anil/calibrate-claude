@@ -122,9 +122,6 @@ export function ChatSidebar({ profile, recents, onNewChat, activeId }: SidebarPr
             </span>
             <div className="min-w-0 flex-1 text-left">
               <div className="truncate text-[13px] font-medium">{profile?.name ?? "Guest"}</div>
-              <div className="truncate text-[11px] text-muted-foreground">
-                @{profile?.handle ?? "guest"}
-              </div>
             </div>
             <Settings className="h-4 w-4 text-muted-foreground" />
           </button>

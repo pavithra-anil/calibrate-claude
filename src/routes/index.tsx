@@ -66,15 +66,9 @@ function Onboarding() {
                 setName(e.target.value);
                 setError(null);
               }}
-              placeholder="Ada Lovelace"
+              placeholder="Priya"
               className="w-full rounded-lg border border-input bg-background px-3.5 py-2.5 text-[15px] outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/15"
             />
-          </div>
-
-          <div>
-            <p className="text-sm text-muted-foreground">
-              No account needed — just your name.
-            </p>
           </div>
 
           {error && (
@@ -88,10 +82,6 @@ function Onboarding() {
             Continue
           </button>
         </form>
-
-        <p className="mt-6 text-center text-xs text-muted-foreground">
-          Stored only on this device.
-        </p>
       </div>
     </main>
   );
