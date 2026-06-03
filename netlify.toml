@@ -1,6 +1,15 @@
 [build]
   command = "npm run build"
-  publish = "dist"
+  publish = "dist/client"
 
 [build.environment]
   NODE_VERSION = "22"
+
+[[redirects]]
+  from = "/*"
+  to = "/.netlify/functions/server"
+  status = 200
+
+[functions]
+  directory = "dist/server"
+  node_bundler = "none"
